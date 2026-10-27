@@ -1,0 +1,13 @@
+{
+  "name": "lg-ipk-download",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Download official LG Content Store IPKs through a webOS TV",
+  "bin": {
+    "lg-ipk-download": "bin/lg-ipk-download.js"
+  },
+  "scripts": {
+    "check": "node --check bin/lg-ipk-download.js && node --check tv/download-ipk.js"
+  },
+  "license": "Apache-2.0"
+}
