@@ -3,6 +3,8 @@
 A host-side CLI that downloads the current official IPK for an LG Content
 Store app. The target does not need to be installed on the TV.
 
+**More webOS tools:** [IPTV Player](https://github.com/lennylxx/webos-iptv-player) · [DevMode Forever](https://github.com/lennylxx/lg-devmode-forever) · [GeoLock Bypass](https://github.com/lennylxx/lg-geolock-bypass)
+
 The command runs on your computer. It temporarily executes a small helper on
 the TV because private palmbus, device-bound SDX authentication, and the
 short-lived signed package URL are only available there. Sensitive headers and
