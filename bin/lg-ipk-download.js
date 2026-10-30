@@ -23,6 +23,7 @@ function usage() {
 Options:
   -o, --output <path>       Local output path
   -d, --device <name>       ares-setup-device profile name
+      --country <code>      Store country/region (e.g. US, DE, CN)
       --api-version <ver>   SDP apps API version (default: 10.0.0)
       --timeout <seconds>   Download timeout (default: 180)
       --keep-remote         Keep the downloaded file on the TV
@@ -30,7 +31,8 @@ Options:
       --json                Print the final result as JSON
   -h, --help                Show this help
 
-Numeric store IDs use the US LG Apps site.
+Numeric store IDs use the selected country's LG Apps site (default: US).
+Without --country, TV requests use the TV's current store region.
 `);
 }
 
@@ -43,6 +45,7 @@ function parseArgs(argv) {
     json: false,
     output: null,
     device: null,
+    country: null,
     input: null
   };
   for (let i = 0; i < argv.length; i += 1) {
@@ -54,6 +57,8 @@ function parseArgs(argv) {
       options.output = argv[++i];
     } else if (arg === '-d' || arg === '--device') {
       options.device = argv[++i];
+    } else if (arg === '--country') {
+      options.country = argv[++i];
     } else if (arg === '--api-version') {
       options.apiVersion = argv[++i];
     } else if (arg === '--timeout') {
@@ -80,17 +85,26 @@ function parseArgs(argv) {
     throw new Error('timeout must be between 15 and 3600 seconds');
   }
   if ((options.output === undefined) || (options.device === undefined) ||
-      (options.apiVersion === undefined)) {
+      (options.apiVersion === undefined) || (options.country === undefined)) {
     throw new Error('an option value is missing');
+  }
+  if (options.country !== null) {
+    if (!/^(?:[A-Za-z]{2}|C01)$/i.test(options.country)) {
+      throw new Error('country must be a two-letter code such as US, DE, or CN');
+    }
+    options.country = options.country.toUpperCase();
+    if (options.country === 'C01') options.country = 'CN';
   }
   return options;
 }
 
-function requestWebsiteApp(appId) {
+function requestWebsiteApp(appId, country) {
   return new Promise((resolve, reject) => {
-    const body = `appId=${encodeURIComponent(appId)}&searchCntryCode=`;
+    const storeCountry = country === 'CN' ? 'C01' : country || 'US';
+    const website = country === 'CN' ? 'wasu' : storeCountry.toLowerCase();
+    const body = `appId=${encodeURIComponent(appId)}&searchCntryCode=${storeCountry}`;
     const request = https.request({
-      hostname: 'us.lgappstv.com',
+      hostname: `${website}.lgappstv.com`,
       port: 443,
       method: 'POST',
       path: '/api/tvapp/retrieveAppInfo.ajax',
@@ -115,7 +129,7 @@ function requestWebsiteApp(appId) {
         }
         const product = (parsed.prodInfo || [])[0];
         if (!product || !product.appName || !product.catCode) {
-          reject(new Error(`LG Apps store ID ${appId} was not found`));
+          reject(new Error(`LG Apps store ID ${appId} was not found in ${country || 'US'}`));
           return;
         }
         resolve({
@@ -132,9 +146,9 @@ function requestWebsiteApp(appId) {
   });
 }
 
-async function resolveInput(input) {
+async function resolveInput(input, country) {
   if (/^[0-9]+$/.test(input)) {
-    return requestWebsiteApp(input);
+    return requestWebsiteApp(input, country);
   }
   if (/^https?:\/\//i.test(input)) {
     throw new Error('store page URLs are not supported; pass the numeric appId instead');
@@ -196,7 +210,7 @@ function sha256File(filename) {
 
 async function main() {
   const options = parseArgs(process.argv.slice(2));
-  const resolvedInput = await resolveInput(options.input);
+  const resolvedInput = await resolveInput(options.input, options.country);
   const remoteHelper = `/tmp/lg-ipk-download-${process.pid}.js`;
   let download = null;
   let pulled = false;
@@ -210,6 +224,9 @@ async function main() {
       '--api-version', shellQuote(options.apiVersion),
       '--timeout', shellQuote(String(options.timeout))
     ];
+    if (options.country) {
+      commandParts.push('--country', shellQuote(options.country));
+    }
     if (resolvedInput.appId) {
       commandParts.push('--app-id', shellQuote(resolvedInput.appId));
     } else {

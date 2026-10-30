@@ -142,17 +142,32 @@ function sdxHeaders(response) {
   return headers;
 }
 
+function storeRegion(sdx, country) {
+  var headers = sdxHeaders(sdx);
+  if (!country) return { hostname: sdx.HOST, headers: headers };
+  headers['X-Device-Country'] = country === 'CN' ? 'C01' : country;
+  headers['X-Device-Country-Group'] = country;
+  if (country === 'CN') {
+    headers['X-Device-Language'] = 'zh-CN';
+    headers['X-Device-Locale'] = 'zh-CN';
+  }
+  return { hostname: country + '.nextlgsdp.com', headers: headers };
+}
+
 function validateDownloadUrl(value) {
   var parsed = url.parse(value);
   if (parsed.protocol !== 'https:' ||
       !parsed.hostname ||
-      !/\.wiselg\.com$/i.test(parsed.hostname)) {
+      (!/\.wiselg\.com$/i.test(parsed.hostname) &&
+       parsed.hostname.toLowerCase() !== 'cn-gfts.tv.wiselg.cn')) {
     throw new Error('SDP returned an unexpected download host');
   }
 }
 
 function normalizeCatalogName(value) {
-  return String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+  return String(value || '').toLowerCase()
+    .replace(/[\s\u2000-\u206f\u3000-\u303f]+/g, '')
+    .replace(/[^a-z0-9\u00c0-\uffff]+/g, '');
 }
 
 function catalogMatchScore(targetName, candidateName) {
@@ -210,7 +225,7 @@ function resolveCatalogApp(hostname, basePath, headers,
         return Number(list.type) === 1;
       })[0] || {};
       var popular = selectCatalogCandidate(targetName, popularList.appList || []);
-      if (popular.app && popular.app.score >= 90) {
+      if (popular.app && popular.app.score === 100) {
         callback(null, popular.app);
         return;
       }
@@ -337,6 +352,12 @@ var categoryId = args['--category-id'] || null;
 var webAppId = args['--web-app-id'] || null;
 var apiVersion = args['--api-version'] || '10.0.0';
 var timeoutSeconds = Number(args['--timeout'] || 180);
+var country = args['--country'];
+if (country !== undefined) {
+  if (!/^(?:[A-Za-z]{2}|C01)$/i.test(country)) die('invalid country code');
+  country = country.toUpperCase();
+  if (country === 'C01') country = 'CN';
+}
 if (appId && !/^[A-Za-z0-9._-]+$/.test(appId)) die('invalid app ID');
 if (!appId && (!catalogName || !categoryId)) die('app ID or catalog hints are required');
 if (categoryId && !/^[A-Za-z0-9._-]+$/.test(categoryId)) die('invalid category ID');
@@ -358,13 +379,15 @@ callLuna(
     if (!sdx.HOST || !/^[A-Za-z0-9.-]+$/.test(sdx.HOST)) {
       die('SDX returned an invalid host');
     }
-    var headers = sdxHeaders(sdx);
+    var region = storeRegion(sdx, country);
+    var hostname = region.hostname;
+    var headers = region.headers;
     var basePath = '/apps/' + apiVersion;
 
     var continueWithAppId = function (resolvedAppId) {
       appId = resolvedAppId;
       var detailPath = basePath + '/app/app?app_id=' + encodeURIComponent(appId);
-      requestJson(sdx.HOST, detailPath, headers, function (detailError, detail) {
+      requestJson(hostname, detailPath, headers, function (detailError, detail) {
         if (detailError) die('app detail request failed', detailError.message);
         var storeApp = detail.app || detail;
         var storeVersion = storeApp.version || null;
@@ -386,7 +409,7 @@ callLuna(
               encodeURIComponent(appId) + '&bin_id=' +
               encodeURIComponent(String(requestBinId)) + '&version=' +
               encodeURIComponent(requestVersion);
-            requestJson(sdx.HOST, installPath, headers, function (installError, install) {
+            requestJson(hostname, installPath, headers, function (installError, install) {
               if (installError) die('install metadata request failed', installError.message);
               var appFile = install.appFile || {};
               var packageVersion = appFile.appVer || storeVersion;
@@ -446,7 +469,7 @@ callLuna(
       return;
     }
     resolveCatalogApp(
-      sdx.HOST,
+      hostname,
       basePath,
       headers,
       categoryId,

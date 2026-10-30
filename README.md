@@ -17,6 +17,7 @@ Store app. You don't need to install the app on your TV first.
 - Node.js on your computer
 - `ares-setup-device` from the webOS CLI
 - `expect`, `ssh`, and `scp`
+- macOS, Linux, or Windows WSL2
 
 Configure the TV with `ares-setup-device` first, then verify it is listed:
 
@@ -41,11 +42,14 @@ The positional argument can be either:
 # Internal Content Store app ID
 ./bin/lg-ipk-download.js com.palmdts.devmode
 
-# Numeric ID from the US LG Apps website
+# Numeric ID from the LG Apps website (US by default)
 ./bin/lg-ipk-download.js 232503
+
+# Select another store country for both website lookup and TV requests
+./bin/lg-ipk-download.js --country DE 232503
 ```
 
-Numeric IDs are resolved through `us.lgappstv.com`.
+See [Country codes](#country-codes).
 
 Example output:
 
@@ -67,6 +71,7 @@ If `--output` is omitted, the IPK is saved to the current directory as:
 ```text
 -o, --output <path>       Local output path
 -d, --device <name>       ares-setup-device profile name
+    --country <code>      Store country/region (e.g. US, DE, CN)
     --api-version <ver>   SDP apps API version (default: 10.0.0)
     --timeout <seconds>   Download timeout (default: 180)
     --keep-remote         Keep the downloaded file on the TV
@@ -80,6 +85,31 @@ Machine-readable example:
 ```bash
 ./bin/lg-ipk-download.js --json com.palmdts.devmode
 ```
+
+## Country codes
+
+Use `--country` with a case-insensitive two-letter code for either numeric or
+internal app IDs. Regional site mappings are automatic and do not change TV
+settings. Without this option, website lookups default to US and TV requests
+use the TV's current store region.
+
+The table lists regions in LG's public store selector. Other two-letter codes
+are accepted, but store and app availability depend on the region and TV model.
+
+| Code | Country/region | Code | Country/region | Code | Country/region |
+|------|----------------|------|----------------|------|----------------|
+| `AE` | United Arab Emirates | `FR` | France | `PE` | Peru |
+| `AR` | Argentina | `GB` | United Kingdom | `PH` | Philippines |
+| `AT` | Austria | `HK` | Hong Kong | `PT` | Portugal |
+| `AU` | Australia | `ID` | Indonesia | `RU` | Russia |
+| `BR` | Brazil | `IL` | Israel | `SG` | Singapore |
+| `CA` | Canada | `IN` | India | `TH` | Thailand |
+| `CL` | Chile | `IT` | Italy | `TR` | Turkey |
+| `CN` | China | `JP` | Japan | `TW` | Taiwan |
+| `CO` | Colombia | `KR` | South Korea | `UA` | Ukraine |
+| `DE` | Germany | `KZ` | Kazakhstan | `US` | United States |
+| `EC` | Ecuador | `MX` | Mexico | `VN` | Vietnam |
+| `ES` | Spain | `MY` | Malaysia | `ZA` | South Africa |
 
 ## How it works
 
