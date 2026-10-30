@@ -102,13 +102,22 @@ function callLuna(handle, uri, payload, timeoutMs, callback) {
   });
 }
 
-function requestJson(hostname, requestPath, headers, callback) {
+function requestJson(hostname, requestPath, headers, callback, postBody) {
+  var requestHeaders = headers;
+  if (postBody !== undefined) {
+    requestHeaders = {};
+    Object.keys(headers).forEach(function (key) {
+      requestHeaders[key] = headers[key];
+    });
+    requestHeaders['Content-Type'] = 'application/x-www-form-urlencoded; charset=utf-8';
+    requestHeaders['Content-Length'] = Buffer.byteLength(postBody);
+  }
   var request = https.request({
     hostname: hostname,
     port: 443,
-    method: 'GET',
+    method: postBody === undefined ? 'GET' : 'POST',
     path: requestPath,
-    headers: headers
+    headers: requestHeaders
   }, function (response) {
     var chunks = [];
     response.on('data', function (chunk) { chunks.push(chunk); });
@@ -118,18 +127,21 @@ function requestJson(hostname, requestPath, headers, callback) {
         callback(new Error('SDP HTTP ' + response.statusCode + ' (' + body.length + ' bytes)'));
         return;
       }
+      var parsed;
       try {
-        callback(null, JSON.parse(body));
+        parsed = JSON.parse(body);
       } catch (error) {
         callback(new Error('invalid SDP JSON (' + body.length + ' bytes)'));
+        return;
       }
+      callback(null, parsed);
     });
   });
   request.on('error', callback);
   request.setTimeout(30000, function () {
     request.destroy(new Error('SDP request timeout'));
   });
-  request.end();
+  request.end(postBody);
 }
 
 function sdxHeaders(response) {
@@ -213,6 +225,117 @@ function catalogList(hostname, basePath, headers, categoryId,
   requestJson(hostname, requestPath, headers, callback);
 }
 
+function catalogApps(hostname, basePath, headers, categoryId, callback) {
+  var apps = [];
+  var pageSize = 92;
+  var fetchPage = function (startIdx) {
+    catalogList(hostname, basePath, headers, categoryId, 5, startIdx,
+      function (pageError, pageResponse) {
+        if (pageError) {
+          callback(pageError);
+          return;
+        }
+        var lists = pageResponse && pageResponse.rankTypeList;
+        if (!Array.isArray(lists)) {
+          callback(new Error('invalid TV catalog response for category ' + categoryId));
+          return;
+        }
+        var list = lists.filter(function (item) {
+          return Number(item.type) === 5;
+        })[0];
+        if (!list || !Array.isArray(list.appList)) {
+          callback(new Error('invalid TV catalog response for category ' + categoryId));
+          return;
+        }
+        apps = apps.concat(list.appList);
+        var total = Number(list.totalAppCount || apps.length);
+        if (!isFinite(total) || total < 0) {
+          callback(new Error('invalid TV catalog count for category ' + categoryId));
+          return;
+        }
+        if (list.appList.length && startIdx + pageSize <= total) {
+          fetchPage(startIdx + pageSize);
+          return;
+        }
+        callback(null, apps);
+      });
+  };
+  fetchPage(1);
+}
+
+function searchApps(hostname, basePath, headers, keyword, callback) {
+  var fetchResults = function (limit, expanded) {
+    var body = 'query=' + encodeURIComponent(keyword) +
+      '&version=v2&service=universal_search&start_index=1&max_results=' +
+      encodeURIComponent(String(limit)) + '&domain=app';
+    requestJson(hostname, basePath + '/search/retrieval', headers,
+      function (error, result) {
+        if (error) {
+          callback(error);
+          return;
+        }
+        var groups = result && result.response && result.response.results;
+        if (!Array.isArray(groups)) {
+          callback(new Error('invalid SDP search response'));
+          return;
+        }
+        var group = groups.filter(function (item) {
+          return item && (item.id || item.domain) === 'app';
+        })[0];
+        if (!group) {
+          if (expanded) {
+            callback(new Error('SDP search results changed during query; please retry'));
+          } else {
+            callback(null, []);
+          }
+          return;
+        }
+        var count = group.total_count;
+        var total = Number(count);
+        if ((typeof count !== 'number' && typeof count !== 'string') ||
+            String(count).trim() === '' || !isFinite(total) || total < 0 ||
+            Math.floor(total) !== total || !Array.isArray(group.doc) ||
+            group.doc.length > total) {
+          callback(new Error('invalid SDP search app results'));
+          return;
+        }
+        if (group.doc.length < total) {
+          if (expanded) {
+            callback(new Error('SDP search returned incomplete app results'));
+          } else {
+            // Offset pages can overlap, so retrieve all keyword matches in one window.
+            fetchResults(total, true);
+          }
+          return;
+        }
+        var matches = [];
+        var seen = Object.create(null);
+        for (var index = 0; index < group.doc.length; index += 1) {
+          var app = group.doc[index];
+          if (!app || typeof app.app_id !== 'string' ||
+              !/^[A-Za-z0-9._-]+$/.test(app.app_id) ||
+              typeof app.title !== 'string' || !app.title.trim()) {
+            callback(new Error('invalid app in SDP search results'));
+            return;
+          }
+          if (!seen[app.app_id]) {
+            seen[app.app_id] = true;
+            matches.push({ id: app.app_id, name: app.title });
+          }
+        }
+        if (matches.length !== total) {
+          callback(new Error('SDP search returned duplicate app results'));
+          return;
+        }
+        matches.sort(function (left, right) {
+          return left.name.localeCompare(right.name) || left.id.localeCompare(right.id);
+        });
+        callback(null, matches);
+      }, body);
+  };
+  fetchResults(92, false);
+}
+
 function resolveCatalogApp(hostname, basePath, headers,
     categoryId, targetName, callback) {
   catalogList(hostname, basePath, headers, categoryId, 1, 1,
@@ -230,36 +353,21 @@ function resolveCatalogApp(hostname, basePath, headers,
         return;
       }
 
-      var apps = [];
-      var pageSize = 92;
-      var fetchPage = function (startIdx) {
-        catalogList(hostname, basePath, headers, categoryId, 5, startIdx,
-          function (pageError, pageResponse) {
-            if (pageError) {
-              callback(pageError);
-              return;
-            }
-            var list = (pageResponse.rankTypeList || []).filter(function (item) {
-              return Number(item.type) === 5;
-            })[0] || {};
-            apps = apps.concat(list.appList || []);
-            var total = Number(list.totalAppCount || apps.length);
-            if ((list.appList || []).length && startIdx + pageSize <= total) {
-              fetchPage(startIdx + pageSize);
-              return;
-            }
-            var selected = selectCatalogCandidate(targetName, apps);
-            if (!selected.app) {
-              var detail = selected.candidates
-                ? JSON.stringify(selected.candidates)
-                : selected.error;
-              callback(new Error(selected.error + (detail ? ': ' + detail : '')));
-              return;
-            }
-            callback(null, selected.app);
-          });
-      };
-      fetchPage(1);
+      catalogApps(hostname, basePath, headers, categoryId, function (error, apps) {
+        if (error) {
+          callback(error);
+          return;
+        }
+        var selected = selectCatalogCandidate(targetName, apps);
+        if (!selected.app) {
+          var detail = selected.candidates
+            ? JSON.stringify(selected.candidates)
+            : selected.error;
+          callback(new Error(selected.error + (detail ? ': ' + detail : '')));
+          return;
+        }
+        callback(null, selected.app);
+      });
     });
 }
 
@@ -352,6 +460,7 @@ var categoryId = args['--category-id'] || null;
 var webAppId = args['--web-app-id'] || null;
 var apiVersion = args['--api-version'] || '10.0.0';
 var timeoutSeconds = Number(args['--timeout'] || 180);
+var search = args['--search'];
 var country = args['--country'];
 if (country !== undefined) {
   if (!/^(?:[A-Za-z]{2}|C01)$/i.test(country)) die('invalid country code');
@@ -359,7 +468,12 @@ if (country !== undefined) {
   if (country === 'C01') country = 'CN';
 }
 if (appId && !/^[A-Za-z0-9._-]+$/.test(appId)) die('invalid app ID');
-if (!appId && (!catalogName || !categoryId)) die('app ID or catalog hints are required');
+if (search !== undefined) {
+  if (!normalizeCatalogName(search)) die('search keyword must contain letters or numbers');
+  if (appId || catalogName || categoryId) die('search cannot be combined with an app ID or catalog hints');
+} else if (!appId && (!catalogName || !categoryId)) {
+  die('app ID or catalog hints are required');
+}
 if (categoryId && !/^[A-Za-z0-9._-]+$/.test(categoryId)) die('invalid category ID');
 if (!/^[0-9]+\.[0-9]+\.[0-9]+$/.test(apiVersion)) die('invalid API version');
 if (!isFinite(timeoutSeconds) || timeoutSeconds < 15 || timeoutSeconds > 3600) {
@@ -383,6 +497,32 @@ callLuna(
     var hostname = region.hostname;
     var headers = region.headers;
     var basePath = '/apps/' + apiVersion;
+
+    if (search !== undefined) {
+      callLuna(
+        handle,
+        'luna://com.webos.service.sdx/getServerUrl',
+        { serviceName: 'sdp_search' },
+        10000,
+        function (serverError, server) {
+          if (serverError) die('SDX search server request failed', serverError.message);
+          var serverMatch = /^https:\/\/([A-Za-z0-9.-]+)(?::443)?\//i.exec(server.baseUrl || '');
+          if (!serverMatch) die('SDX returned an invalid search URL');
+          searchApps(
+            country ? hostname : serverMatch[1],
+            '/search/' + apiVersion,
+            headers,
+            search,
+            function (error, apps) {
+              if (error) die('app search failed', error.message);
+              console.log(JSON.stringify({ ok: true, apps: apps }));
+              process.exit(0);
+            }
+          );
+        }
+      );
+      return;
+    }
 
     var continueWithAppId = function (resolvedAppId) {
       appId = resolvedAppId;

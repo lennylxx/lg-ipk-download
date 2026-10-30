@@ -19,12 +19,16 @@ function fail(message) {
 function usage() {
   process.stdout.write(`Usage:
   lg-ipk-download [options] <internal-app-id|numeric-store-id>
+  lg-ipk-download search [options] <keyword>
+
+Commands:
+  search <keyword>          Search for apps without downloading
 
 Options:
   -o, --output <path>       Local output path
   -d, --device <name>       ares-setup-device profile name
       --country <code>      Store country/region (e.g. US, DE, CN)
-      --api-version <ver>   SDP apps API version (default: 10.0.0)
+      --api-version <ver>   SDP API version (default: 10.0.0)
       --timeout <seconds>   Download timeout (default: 180)
       --keep-remote         Keep the downloaded file on the TV
       --force               Replace an existing output file
@@ -46,8 +50,10 @@ function parseArgs(argv) {
     output: null,
     device: null,
     country: null,
+    search: null,
     input: null
   };
+  let searching = false;
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === '-h' || arg === '--help') {
@@ -71,13 +77,25 @@ function parseArgs(argv) {
       options.json = true;
     } else if (arg.startsWith('-')) {
       throw new Error(`unknown option: ${arg}`);
+    } else if (arg === 'search' && !searching && options.input === null) {
+      searching = true;
+    } else if (searching) {
+      if (options.search !== null) throw new Error('only one search keyword may be specified');
+      options.search = arg;
     } else if (options.input) {
       throw new Error('only one app identifier may be specified');
     } else {
       options.input = arg;
     }
   }
-  if (!options.input) throw new Error('app identifier is required');
+  if (searching) {
+    if (options.search === null || !options.search.trim()) throw new Error('search keyword is required');
+    if (options.output !== null || options.keepRemote || options.force) {
+      throw new Error('--output, --keep-remote, and --force are only valid when downloading');
+    }
+  } else if (!options.input) {
+    throw new Error('app identifier is required');
+  }
   if (!/^[0-9]+\.[0-9]+\.[0-9]+$/.test(options.apiVersion || '')) {
     throw new Error('API version must look like 10.0.0');
   }
@@ -210,7 +228,9 @@ function sha256File(filename) {
 
 async function main() {
   const options = parseArgs(process.argv.slice(2));
-  const resolvedInput = await resolveInput(options.input, options.country);
+  const resolvedInput = options.search === null
+    ? await resolveInput(options.input, options.country)
+    : null;
   const remoteHelper = `/tmp/lg-ipk-download-${process.pid}.js`;
   let download = null;
   let pulled = false;
@@ -227,7 +247,9 @@ async function main() {
     if (options.country) {
       commandParts.push('--country', shellQuote(options.country));
     }
-    if (resolvedInput.appId) {
+    if (options.search !== null) {
+      commandParts.push('--search', shellQuote(options.search));
+    } else if (resolvedInput.appId) {
       commandParts.push('--app-id', shellQuote(resolvedInput.appId));
     } else {
       commandParts.push(
@@ -239,8 +261,23 @@ async function main() {
     const command = commandParts.join(' ');
     const result = runTransport('run', [command], options);
     if (result.stderr) process.stderr.write(result.stderr);
-    download = parseLastJson(result.stdout);
-    if (!download.ok) throw new Error(download.error || 'TV download failed');
+    const response = parseLastJson(result.stdout);
+    if (!response.ok) throw new Error(response.error || 'TV request failed');
+    if (options.search !== null) {
+      if (!Array.isArray(response.apps)) throw new Error('TV helper returned invalid search results');
+      if (options.json) {
+        process.stdout.write(`${JSON.stringify({ query: options.search, apps: response.apps })}\n`);
+      } else if (!response.apps.length) {
+        process.stdout.write('No matching apps found.\n');
+      } else {
+        process.stdout.write('App ID\tName\n');
+        response.apps.forEach(app => {
+          process.stdout.write(`${app.id}\t${app.name}\n`);
+        });
+      }
+      return;
+    }
+    download = response;
 
     const defaultName = `${download.appId}_${download.packageVersion}.ipk`;
     const output = path.resolve(options.output || defaultName);

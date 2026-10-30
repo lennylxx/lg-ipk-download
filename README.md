@@ -66,13 +66,27 @@ If `--output` is omitted, the IPK is saved to the current directory as:
 <app-id>_<store-version>.ipk
 ```
 
+## Search
+
+Search the TV's app store by keyword or internal ID without downloading or
+installing anything:
+
+```bash
+./bin/lg-ipk-download.js search "Developer Mode"
+./bin/lg-ipk-download.js search "Developer Mode" --country DE
+```
+
+Results include each matching app's name and internal ID. Searches require
+a connected TV and use its current store region unless `--country` is specified.
+Search runs on LG's servers and may include related apps.
+
 ## Options
 
 ```text
 -o, --output <path>       Local output path
 -d, --device <name>       ares-setup-device profile name
     --country <code>      Store country/region (e.g. US, DE, CN)
-    --api-version <ver>   SDP apps API version (default: 10.0.0)
+    --api-version <ver>   SDP API version (default: 10.0.0)
     --timeout <seconds>   Download timeout (default: 180)
     --keep-remote         Keep the downloaded file on the TV
     --force               Replace an existing output file
@@ -88,8 +102,8 @@ Machine-readable example:
 
 ## Country codes
 
-Use `--country` with a case-insensitive two-letter code for either numeric or
-internal app IDs. Regional site mappings are automatic and do not change TV
+Use `--country` with a case-insensitive two-letter code for downloads or searches.
+Regional site mappings are automatic and do not change TV
 settings. Without this option, website lookups default to US and TV requests
 use the TV's current store region.
 
