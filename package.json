@@ -1,6 +1,6 @@
 {
   "name": "lg-ipk",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Download IPKs from the LG Content Store in any country on your computer, with automatic NCG decryption",
   "keywords": [
     "lg",
