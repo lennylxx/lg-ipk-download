@@ -78,8 +78,11 @@ The library call sequence:
    derives its internal device id from it.
 2. `NCG_MakeRORequestMsgWithSSID(agent, rsid, msg, &len)` builds the
    form-urlencoded request body.
-3. `POST http://kr.security.lgtvsdp.com/license_manager.asp` (plain HTTP) with
-   the SDX headers.
+3. `POST` to applicense's `RightObjectURL` with the SDX headers, honoring its
+   scheme: observed plain `http://kr.security.lgtvsdp.com/license_manager.asp`
+   (http/80) on one firmware/region generation and
+   `https://aic.security.lgtvsdp.com/license_manager.asp` (https/443) on
+   another.
 4. `NCG_SaveROResponseMsg(agent, response)` parses the license.
 
 ### TV-native execution
@@ -92,8 +95,8 @@ them to `GLIBC_2.34`). `ncg/fetch-cek.js` runs the whole exchange from
 the host:
 
 1. Pick one NCG file from the encrypted IPK (host side, node one-liner).
-2. Push the driver (`tv/ro-exchange.js`), the addon, and the NCG file to
-   `/tmp/ncgrow` on the TV.
+2. Push the driver (`tv/ro-exchange.js`), its shared `tv/anon-bus.js`, the
+   addon, and the NCG file to the TV working tree `<temp root>/ncgrow`.
 3. On the TV, one node process does everything: SDX headers from the SDX service
    (held in memory, never written to disk), `RightSessionID`/`RightObjectURL`
    from the applicense endpoint of the selected store region (`--country`, or
@@ -109,7 +112,7 @@ the host:
    caches the CEK with `lg-ipk cache add`. If the driver died
    before printing, the CEK is recovered from the TV library log
    `/var/log/ncgdrm-*.log` instead.
-6. Clean up `/tmp/ncgrow` (wiped on reboot anyway).
+6. Clean up the working tree (wiped on reboot anyway).
 
 Properties: the request leaves from the TV's own IP (the most normal pattern
 from LG's perspective), the signed headers never leave the TV's node process,

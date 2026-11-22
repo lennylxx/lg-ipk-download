@@ -30,34 +30,11 @@
 //     [--device-id 00:11:22:33:44:55] \
 //     [--verify-file /tmp/ncgrow/files/index.html] \
 //     [--secret-dir /tmp/ncgrow/secret] [--timeout 30000]
-// pmloglib (a webOS logging module) does not exist on the TV's node; stub it
-// with no-ops so a require() of it cannot throw.
-var Module = require('module');
-var originalLoad = Module._load;
-var noop = function () {};
-var logger = function () {
-  return { log: noop, info: noop, warn: noop, warning: noop, error: noop };
-};
-
-Module._load = function (request) {
-  if (request === 'pmloglib') {
-    return {
-      log: noop,
-      info: noop,
-      warning: noop,
-      error: noop,
-      Console: logger,
-      Context: logger
-    };
-  }
-  return originalLoad.apply(this, arguments);
-};
-
 var fs = require('fs');
 var http = require('http');
 var https = require('https');
 var path = require('path');
-var palmbus = require('palmbus');
+var openPrivateHandle = require('./anon-bus.js').openPrivateHandle;
 
 var args = {};
 for (var i = 2; i < process.argv.length; i += 2) {
@@ -74,7 +51,10 @@ var RO_URL = args['--ro-url'] || '';
 var SO_PATH = args['--so-path'] || '';
 var DEVICE_ID = args['--device-id'] || '';
 var VERIFY_FILE = args['--verify-file'] || '';
-var SECRET_DIR = args['--secret-dir'] || '/tmp/ncgrow/secret';
+// Defaults to the working tree next to the pushed addon (fetch-cek creates
+// <addon dir>/secret)
+var SECRET_DIR = args['--secret-dir'] ||
+  (ADDON_PATH ? path.join(path.dirname(ADDON_PATH), 'secret') : '');
 var TIMEOUT_MS = Number(args['--timeout'] || 30000);
 
 var APP_INFO = { sid: SID, roUrl: RO_URL };
@@ -101,15 +81,6 @@ try {
 }
 
 // SDX headers ----------------------------------------------------------------
-// Anonymous private handle (no app id); the SDX service answers it.
-function openPrivateHandle() {
-  try {
-    return new palmbus.Handle('', false);
-  } catch (error) {
-    throw new Error('anonymous private palmbus handle unavailable: ' + error.message);
-  }
-}
-
 function callLunaRaw(handle, uri, payload, timeoutMs, callback) {
   var done = false;
   var timer;
@@ -154,8 +125,10 @@ function sdxHeaders(response) {
   return headers;
 }
 
-// plain HTTP helper ----------------------------------------------------------
-// useTls: store endpoints are https/443; the RO server is plain http/80.
+// HTTP helper ----------------------------------------------------------------
+// useTls: store endpoints are https/443; the RO server follows the scheme of
+// applicense's RightObjectURL (observed plain http/80 and https/443 on
+// different firmware/region generations).
 function requestHttp(hostname, port, requestPath, headers, method, body,
                      useTls, callback) {
   var request = (useTls ? https : http).request({
@@ -236,9 +209,16 @@ function fetchApplicense(sdx, callback) {
     });
 }
 
-// The RO POST: plain http (port 80); SDX headers stay in memory.
+// The RO POST: the scheme comes from applicense's RightObjectURL (observed
+// plain http on one firmware/region generation, https on another); SDX
+// headers stay in memory.
 function postRo(sdx, body, callback) {
-  var host = APP_INFO.roUrl.replace(/^http:\/\//, '');
+  var schemeMatch = /^(https?):\/\/(.+)$/i.exec(APP_INFO.roUrl);
+  if (!schemeMatch) {
+    return callback(new Error('invalid RO URL scheme'));
+  }
+  var useTls = schemeMatch[1].toLowerCase() === 'https';
+  var host = schemeMatch[2];
   var slash = host.indexOf('/');
   var hostname = slash === -1 ? host : host.slice(0, slash);
   var requestPath = slash === -1 ? '/' : host.slice(slash);
@@ -248,8 +228,8 @@ function postRo(sdx, body, callback) {
   requestHeaders['Content-Type'] =
     'application/x-www-form-urlencoded; charset=utf-8';
   requestHeaders['Connection'] = 'close';
-  requestHttp(hostname, 80, requestPath, requestHeaders, 'POST', body,
-    false, function (error, result) {
+  requestHttp(hostname, useTls ? 443 : 80, requestPath, requestHeaders, 'POST',
+    body, useTls, function (error, result) {
       if (error) return callback(error);
       if (result.statusCode !== 200) {
         return callback(new Error('RO POST status ' + result.statusCode));

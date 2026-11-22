@@ -265,6 +265,9 @@ if (e.TV_MODE === 'push') {
   fs.accessSync(e.TV_SRC);
 } else if (e.TV_MODE === 'pull') {
   fs.copyFileSync(e.SMOKE_IPK, e.TV_DST);
+} else if (e.TV_CMD.includes('process.versions.node')) {
+  // Simulate an older TV (Node 16) so the temp root stays /tmp.
+  console.log('16');
 } else if (e.TV_CMD.includes('--search')) {
   console.log(JSON.stringify({ ok: true, apps: [{ id: e.SMOKE_APP, name: 'Smoke' }] }));
 } else if (e.TV_CMD.includes('ro-exchange.js')) {

@@ -11,14 +11,15 @@
 // What it does (one live RO exchange, then nothing more touches LG):
 //   1. pick one NCG file out of the given encrypted IPK (host side)
 //   2. push the driver (tv/ro-exchange.js), the N-API addon
-//      (ncg/dist/ncg_native.node) and the NCG file to /tmp/ncgrow
+//      (ncg/dist/ncg_native.node) and the NCG file to the TV working tree
+//      (<temp root>/ncgrow)
 //   3. the driver: SDX headers (luna) -> applicense (sid + RO URL) ->
 //      addon init / makeRequest / save -> CEK; --verify-file proves the CEK
 //      against the pushed NCG file through the library itself
 //   4. capture the CEK from the driver's JSON line (host side; fallback:
 //      the TV library log /var/log/ncgdrm-*.log)
 //   5. cache the CEK locally (lg-ipk cache add)
-//   6. clean up /tmp/ncgrow on the TV (it is also wiped on reboot)
+//   6. clean up the working tree on the TV (it is also wiped on reboot)
 //
 // Prerequisites: ares-setup-device + expect (same as lib/tv.sh), and a
 // prebuilt addon:
@@ -36,7 +37,7 @@
 //       --device <profile>    ares-setup-device profile (default device)
 //       --device-id <mac>     Override the TV's eth0 MAC read by the driver
 //       --skip-cache          Print the CEK without caching it
-//       --keep-remote         Leave /tmp/ncgrow on the TV
+//       --keep-remote         Leave the working tree on the TV
 //   -h, --help                Show this help
 //
 // Keep this rare: repeated RO requests from one device risk the device being
@@ -56,11 +57,12 @@ const parseOptions = require('../lib/parse-options');
 
 const ROOT = path.resolve(__dirname, '..');
 const TV = path.join(ROOT, 'lib', 'tv.sh');
-const WORK = '/tmp/ncgrow';
+const { tvTempRoot } = require('../lib/store');
 // Relative on purpose: every tv.sh spawn runs from the repo root, so the
 // remote-side commands and the scp source paths stay identical to what the
 // TV (and the docs) expect.
 const DRIVER = 'tv/ro-exchange.js';
+const ANON_BUS = 'tv/anon-bus.js';
 const ADDON = 'ncg/dist/ncg_native.node';
 
 const USAGE = `Usage: lg-ipk fetch-cek --app-id <id> --ipk <file> [options]
@@ -128,6 +130,8 @@ function run(argv) {
     process.stderr.write(`error: ${ADDON} not found; run ncg/build.sh first\n`);
     process.exit(1);
   }
+
+  const WORK = `${tvTempRoot({ timeout: 120, device: deviceProfile })}/ncgrow`;
 
   const env = Object.assign({}, process.env);
   if (env.NCG_CACHE_DIR) env.NCG_CACHE_DIR = cache.defaultCacheDir();
@@ -202,6 +206,7 @@ function run(argv) {
     process.stdout.write(`\n== push driver + addon + NCG file to ${WORK} on the TV\n`);
     tvOrDie('run', `rm -rf ${WORK} && mkdir -p ${WORK}/files ${WORK}/secret`);
     tvOrDie('push', DRIVER, `${WORK}/ro-exchange.js`);
+    tvOrDie('push', ANON_BUS, `${WORK}/anon-bus.js`);
     tvOrDie('push', ADDON, `${WORK}/ncg_native.node`);
     tvOrDie('push', ngcLocal, `${WORK}/files/${ngcBase}`);
 

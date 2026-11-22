@@ -3,32 +3,11 @@
 
 // Runs on the TV. Sensitive SDX headers and signed URLs never leave this
 // process; stdout contains only non-sensitive metadata.
-var Module = require('module');
-var originalLoad = Module._load;
-var noop = function () {};
-var logger = function () {
-  return { log: noop, info: noop, warn: noop, warning: noop, error: noop };
-};
-
-Module._load = function (request) {
-  if (request === 'pmloglib') {
-    return {
-      log: noop,
-      info: noop,
-      warning: noop,
-      error: noop,
-      Console: logger,
-      Context: logger
-    };
-  }
-  return originalLoad.apply(this, arguments);
-};
-
 var fs = require('fs');
 var https = require('https');
 var path = require('path');
 var url = require('url');
-var palmbus = require('palmbus');
+var openPrivateHandle = require('./anon-bus.js').openPrivateHandle;
 
 var args = {};
 for (var i = 2; i < process.argv.length; i += 2) {
@@ -42,16 +21,6 @@ function die(message, detail) {
     detail: detail || null
   }));
   process.exit(1);
-}
-
-function openPrivateHandle() {
-  try {
-    // Anonymous private-bus access pattern from:
-    // https://github.com/lennylxx/lg-geolock-bypass
-    return new palmbus.Handle('', false);
-  } catch (error) {
-    throw new Error('anonymous private palmbus handle unavailable: ' + error.message);
-  }
 }
 
 function callLunaRaw(handle, uri, payload, timeoutMs, callback) {

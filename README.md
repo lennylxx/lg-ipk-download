@@ -234,7 +234,10 @@ and has no webOS version dependency.
 1. If given a numeric store ID, look up the app name and category through
    the LG Apps `retrieveAppInfo.ajax` endpoint.
 2. Read the selected TV connection from `ares-setup-device`.
-3. Push `tv/download-ipk.js` to a unique path under `/tmp`.
+3. Query the TV's Node version to select its temporary root (see
+   [Temporary directories](#temporary-directories)), then push
+   `tv/download-ipk.js` (with its shared `tv/anon-bus.js`) to a unique
+   path under it.
 4. Run the helper over SSH.
 5. Pull the completed IPK with SCP.
 6. Check the file size against the size reported by LG, and compute the SHA-256.
@@ -303,7 +306,10 @@ that URL in memory only.
 
 ## Temporary directories
 
-The helper uses the first writable location from this list:
+The temp root depends on the webOS version: webOS 26 and newer use
+`/media/developer/temp`; earlier versions use `/tmp`.
+
+The on-TV download directory uses the first writable location from this list:
 
 1. `/tmp/lg-ipk-download`
 2. `/media/developer/temp/lg-ipk-download`
